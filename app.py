@@ -3,40 +3,117 @@ import pandas as pd
 from io import BytesIO
 from openpyxl.styles import PatternFill
 
-st.set_page_config(page_title="Transformation Facturation", layout="wide")
+# ======================
+# CONFIG PAGE
+# ======================
+st.set_page_config(
+    page_title="Transformation de facturation",
+    layout="wide"
+)
+
 st.title("🧾 Outil de transformation de facturation")
+st.caption(
+    "Importez vos fichiers de facturation. "
+    "L’outil génère automatiquement un Excel final propre et synthétique."
+)
 
-doc1 = st.file_uploader("📄 Fichier de facturation (Doc 1)", type=["csv", "xlsx"])
-doc2 = st.file_uploader("📄 Liste des raisons sociales (Doc 2)", type=["csv", "xlsx"])
+# ======================
+# UPLOAD FICHIERS
+# ======================
+doc1 = st.file_uploader(
+    "📄 Fichier de facturation (Doc 1)",
+    type=["csv", "xlsx"]
+)
 
+doc2 = st.file_uploader(
+    "📄 Liste des raisons sociales (Doc 2)",
+    type=["csv", "xlsx"]
+)
+
+# ======================
+# LECTURE ROBUSTE DES FICHIERS
+# ======================
 def read_file(file):
-    if file.name.endswith(".csv"):
-        return pd.read_csv(file, engine="python")
-    return pd.read_excel(file)
+    try:
+        if file.name.lower().endswith(".xlsx"):
+            return pd.read_excel(file)
 
+        # Tentatives CSV successives (réalistes terrain)
+        try:
+            return pd.read_csv(file, sep=";", encoding="utf-8", engine="python")
+        except:
+            try:
+                return pd.read_csv(file, sep=",", encoding="utf-8", engine="python")
+            except:
+                return pd.read_csv(
+                    file,
+                    sep=";",
+                    encoding="latin1",
+                    engine="python",
+                    on_bad_lines="skip"
+                )
+    except Exception:
+        raise ValueError(
+            "Impossible de lire le fichier. "
+            "Merci de vérifier le format CSV ou Excel."
+        )
+
+# ======================
+# TRAITEMENT PRINCIPAL
+# ======================
 if doc1 and doc2:
-    df = read_file(doc1)
-    rs_df = read_file(doc2)
+    try:
+        df = read_file(doc1)
+        rs_df = read_file(doc2)
+    except Exception as e:
+        st.error(f"❌ Erreur lors de la lecture des fichiers : {e}")
+        st.stop()
 
-    # Normalisation
+    # ======================
+    # VÉRIFICATIONS DE BASE
+    # ======================
+    if df.shape[1] < 10:
+        st.error("❌ Le fichier de facturation ne contient pas assez de colonnes.")
+        st.stop()
+
+    if rs_df.shape[1] < 1:
+        st.error("❌ Le fichier des raisons sociales est invalide.")
+        st.stop()
+
+    # ======================
+    # NORMALISATION
+    # ======================
     df.iloc[:, 1] = df.iloc[:, 1].astype(str).str.strip()
     rs_df.iloc[:, 0] = rs_df.iloc[:, 0].astype(str).str.strip()
-    df.iloc[:, 9] = pd.to_numeric(df.iloc[:, 9], errors="coerce").fillna(0)
 
-    # Filtrage de base (commun)
+    df.iloc[:, 9] = pd.to_numeric(
+        df.iloc[:, 9],
+        errors="coerce"
+    ).fillna(0)
+
+    # ======================
+    # CHOIX COLONNE SMS / VOCAL (UX FRIENDLY)
+    # ======================
+    service_col = st.selectbox(
+        "📡 Colonne indiquant le type de service (SMS / Vocal)",
+        options=df.columns
+    )
+
+    # ======================
+    # FILTRAGE DE BASE
+    # ======================
     base_df = df[
         (df.iloc[:, 4] != "NOT INJECTED") &
         (df.iloc[:, 9] > 0)
     ].copy()
 
     in_doc2 = base_df.iloc[:, 1].isin(rs_df.iloc[:, 0])
-    service_col = base_df.columns[3]  # colonne type SMS / Vocal (à adapter si besoin)
 
     is_sms = base_df[service_col].str.contains("SMS", case=False, na=False)
     is_vocal = base_df[service_col].str.contains("VOCAL|VOICE", case=False, na=False)
 
     # ======================
-    # Synthèse globale
+    # SYNTHÈSE GLOBALE
     # ======================
     summary = pd.DataFrame({
         "Catégorie": [
@@ -54,9 +131,13 @@ if doc1 and doc2:
     })
 
     # ======================
-    # Facturation détaillée (doc 2 uniquement)
+    # FACTURATION DÉTAILLÉE (DOC 2)
     # ======================
     df_filtered = base_df[in_doc2]
+
+    if df_filtered.empty:
+        st.warning("⚠️ Aucune ligne retenue après filtrage.")
+        st.stop()
 
     group_cols = [df.columns[1], df.columns[2]]
     agg_rules = {col: "first" for col in df.columns}
@@ -69,34 +150,53 @@ if doc1 and doc2:
         .sort_values(by=df.columns[1])
     )
 
-    st.subheader("Aperçu facturation détaillée")
+    # ======================
+    # APERÇU
+    # ======================
+    st.subheader("🔎 Aperçu de la facturation finale")
     st.dataframe(df_final, use_container_width=True)
 
+    st.info(
+        f"✔ {df_final.shape[0]} lignes générées\n"
+        f"✔ {df_final.iloc[:,1].nunique()} raisons sociales"
+    )
+
     # ======================
-    # Export Excel
+    # EXPORT EXCEL AVEC COULEURS
     # ======================
     output = BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        df_final.to_excel(writer, index=False, sheet_name="Facturation détaillée")
-        summary.to_excel(writer, index=False, sheet_name="Synthèse globale")
+        df_final.to_excel(
+            writer,
+            index=False,
+            sheet_name="Facturation détaillée"
+        )
+        summary.to_excel(
+            writer,
+            index=False,
+            sheet_name="Synthèse globale"
+        )
 
         ws = writer.sheets["Facturation détaillée"]
+
         fill_a = PatternFill("solid", fgColor="EEEEEE")
         fill_b = PatternFill("solid", fgColor="FFFFFF")
 
         last_rs = None
         toggle = False
+
         for row in range(2, ws.max_row + 1):
             rs = ws.cell(row=row, column=2).value
             if rs != last_rs:
                 toggle = not toggle
                 last_rs = rs
+
             fill = fill_a if toggle else fill_b
             for col in range(1, ws.max_column + 1):
                 ws.cell(row=row, column=col).fill = fill
 
     st.download_button(
-        "⬇️ Télécharger l'Excel final",
+        "⬇️ Télécharger l’Excel final",
         data=output.getvalue(),
         file_name="facturation_finale.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
