@@ -37,21 +37,17 @@ doc2 = st.file_uploader(
 # ======================
 def read_file(file):
     try:
-        # -------- Excel --------
         if file.name.lower().endswith(".xlsx"):
             return pd.read_excel(file)
 
-        # -------- CSV --------
         raw = file.read()
         file.seek(0)
 
-        # Décodage
         try:
             text = raw.decode("utf-8")
         except UnicodeDecodeError:
             text = raw.decode("latin1")
 
-        # Détection automatique du séparateur
         sniffer = csv.Sniffer()
         dialect = sniffer.sniff(text[:5000], delimiters=";,|\t")
         sep = dialect.delimiter
@@ -63,7 +59,7 @@ def read_file(file):
             on_bad_lines="skip"
         )
 
-    except Exception as e:
+    except Exception:
         raise ValueError(
             "Impossible de lire le fichier CSV ou Excel. "
             "Merci de vérifier le format du fichier."
@@ -91,9 +87,7 @@ if doc1 and doc2:
         st.error("❌ Le fichier des raisons sociales est invalide.")
         st.stop()
 
-    st.success(
-        f"📊 Fichier chargé : {df.shape[0]} lignes – {df.shape[1]} colonnes"
-    )
+    st.success(f"📊 Fichier chargé : {df.shape[0]} lignes – {df.shape[1]} colonnes")
 
     # ======================
     # NORMALISATION
@@ -101,18 +95,12 @@ if doc1 and doc2:
     df.iloc[:, 1] = df.iloc[:, 1].astype(str).str.strip()
     rs_df.iloc[:, 0] = rs_df.iloc[:, 0].astype(str).str.strip()
 
-    df.iloc[:, 9] = pd.to_numeric(
-        df.iloc[:, 9],
-        errors="coerce"
-    ).fillna(0)
+    df.iloc[:, 9] = pd.to_numeric(df.iloc[:, 9], errors="coerce").fillna(0)
 
     # ======================
-    # CHOIX COLONNE SERVICE
+    # RÈGLE MÉTIER FIXE
     # ======================
-    service_col = st.selectbox(
-        "📡 Colonne indiquant le type de service (SMS / Vocal)",
-        options=df.columns
-    )
+    service_col = df.columns[3]  # Colonne D
 
     # ======================
     # FILTRAGE DE BASE
@@ -124,8 +112,8 @@ if doc1 and doc2:
 
     in_doc2 = base_df.iloc[:, 1].isin(rs_df.iloc[:, 0])
 
-    is_sms = base_df[service_col].str.contains("SMS", case=False, na=False)
-    is_vocal = base_df[service_col].str.contains("VOCAL|VOICE", case=False, na=False)
+    is_sms = base_df[service_col] == "SMS"
+    is_vocal = base_df[service_col] == "VOCAL"
 
     # ======================
     # SYNTHÈSE GLOBALE
@@ -177,20 +165,12 @@ if doc1 and doc2:
     )
 
     # ======================
-    # EXPORT EXCEL AVEC COULEURS
+    # EXPORT EXCEL
     # ======================
     output = BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        df_final.to_excel(
-            writer,
-            index=False,
-            sheet_name="Facturation détaillée"
-        )
-        summary.to_excel(
-            writer,
-            index=False,
-            sheet_name="Synthèse globale"
-        )
+        df_final.to_excel(writer, index=False, sheet_name="Facturation détaillée")
+        summary.to_excel(writer, index=False, sheet_name="Synthèse globale")
 
         ws = writer.sheets["Facturation détaillée"]
 
