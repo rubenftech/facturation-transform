@@ -190,6 +190,19 @@ if doc1 and doc2:
             for col in range(1, ws.max_column + 1):
                 ws.cell(row=row, column=col).fill = fill
 
+
+    # ======================
+    # APERÇU SYNTHÈSE GLOBALE
+    # ======================
+    st.subheader("📊 Synthèse globale")
+    st.dataframe(summary, use_container_width=True)
+    
+    st.info(
+        "Cette synthèse est incluse dans la deuxième feuille de l’Excel téléchargé."
+    )
+
+
+
     st.download_button(
         "⬇️ Télécharger l’Excel final",
         data=output.getvalue(),
