@@ -60,37 +60,50 @@ def read_file(file):
 # ======================
 if doc1 and doc2 and st.button("🚀 Transformer les fichiers"):
     with st.spinner("⏳ Transformation en cours…"):
+
+        # ----------------------
         # Lecture
+        # ----------------------
         df = read_file(doc1)
         rs_df = read_file(doc2)
 
+        # ----------------------
         # Normalisation
-        df.iloc[:, 1] = df.iloc[:, 1].astype(str).str.strip()  # raison sociale
+        # ----------------------
+        df.iloc[:, 1] = df.iloc[:, 1].astype(str).str.strip()   # Raison sociale
         rs_df.iloc[:, 0] = rs_df.iloc[:, 0].astype(str).str.strip()
+
         df.iloc[:, 9] = pd.to_numeric(df.iloc[:, 9], errors="coerce")
 
+        # ----------------------
         # Suppression lignes invalides
+        # ----------------------
         df = df[
-            df.iloc[:, 6].notna() &  # Date d'opération
-            df.iloc[:, 4].notna()    # Status
+            df.iloc[:, 4].notna() &   # Status
+            df.iloc[:, 6].notna()     # Date d’opération
         ].copy()
 
-        # Filtres métier
-        base_df = df[
+        # ----------------------
+        # Base ALL (pour résumé)
+        # ----------------------
+        base_all = df[
             (df.iloc[:, 4] != "NOT INJECTED") &
             (df.iloc[:, 9] > 0)
         ].copy()
 
+        # ----------------------
         # Filtre Doc 2
-        in_doc2 = base_df.iloc[:, 1].isin(rs_df.iloc[:, 0])
-        base_df = base_df[in_doc2]
+        # ----------------------
+        in_doc2_all = base_all.iloc[:, 1].isin(rs_df.iloc[:, 0])
+        base_doc2 = base_all[in_doc2_all].copy()
 
         # ======================
         # SYNTHÈSE GLOBALE
         # ======================
         service_col = df.columns[3]
-        is_sms = base_df[service_col] == "SMS"
-        is_vocal = base_df[service_col] == "VOCAL"
+
+        is_sms_all = base_all[service_col] == "SMS"
+        is_vocal_all = base_all[service_col] == "VOCAL"
 
         summary = pd.DataFrame({
             "Catégorie": [
@@ -100,10 +113,10 @@ if doc1 and doc2 and st.button("🚀 Transformer les fichiers"):
                 "Vocal – Autres raisons sociales"
             ],
             "Nombre de messages": [
-                base_df[is_sms].iloc[:, 9].sum(),
-                0,
-                base_df[is_vocal].iloc[:, 9].sum(),
-                0,
+                base_all[is_sms_all & in_doc2_all].iloc[:, 9].sum(),
+                base_all[is_sms_all & ~in_doc2_all].iloc[:, 9].sum(),
+                base_all[is_vocal_all & in_doc2_all].iloc[:, 9].sum(),
+                base_all[is_vocal_all & ~in_doc2_all].iloc[:, 9].sum(),
             ]
         })
 
@@ -113,25 +126,25 @@ if doc1 and doc2 and st.button("🚀 Transformer les fichiers"):
         )
 
         # ======================
-        # AGRÉGATION DÉTAILLÉE
+        # FACTURATION DÉTAILLÉE
         # ======================
         group_cols = [df.columns[1], df.columns[2]]
 
         agg = {
-            df.columns[0]: "first",  # plateforme
-            df.columns[1]: "first",  # raison sociale
-            df.columns[2]: "first",  # numéro opération
-            df.columns[3]: "first",  # type
-            df.columns[4]: "first",  # status
-            df.columns[5]: "first",  # nom opération
-            df.columns[6]: "first",  # date
-            df.columns[7]: "first",  # validation
-            df.columns[8]: "first",  # pays
-            df.columns[9]: "sum",    # nombre messages
+            df.columns[0]: "first",  # Plateforme
+            df.columns[1]: "first",  # Raison sociale
+            df.columns[2]: "first",  # Numéro opération
+            df.columns[3]: "first",  # Type
+            df.columns[4]: "first",  # Status
+            df.columns[5]: "first",  # Nom opération
+            df.columns[6]: "first",  # Date
+            df.columns[7]: "first",  # Validation
+            df.columns[8]: "first",  # Pays
+            df.columns[9]: "sum",    # Nombre messages
         }
 
         df_final = (
-            base_df
+            base_doc2
             .groupby(group_cols, as_index=False)
             .agg(agg)
         )
@@ -169,7 +182,7 @@ if doc1 and doc2 and st.button("🚀 Transformer les fichiers"):
     st.subheader("📊 Résumé global SMS / Vocal")
     st.dataframe(summary_display, width="stretch")
 
-    st.info("Ce résumé est inclus dans la deuxième feuille de l’Excel.")
+    st.info("Le résumé est inclus dans la deuxième feuille de l’Excel.")
 
     # ======================
     # EXPORT EXCEL
