@@ -2,6 +2,8 @@ import streamlit as st
 import pandas as pd
 from io import BytesIO
 from openpyxl.styles import PatternFill
+import csv
+import io
 
 # ======================
 # CONFIG PAGE
@@ -14,7 +16,7 @@ st.set_page_config(
 st.title("🧾 Outil de transformation de facturation")
 st.caption(
     "Importez vos fichiers de facturation. "
-    "L’outil génère automatiquement un Excel final propre et synthétique."
+    "L’outil génère automatiquement un Excel final propre et exploitable."
 )
 
 # ======================
@@ -31,31 +33,40 @@ doc2 = st.file_uploader(
 )
 
 # ======================
-# LECTURE ROBUSTE DES FICHIERS
+# LECTURE ROBUSTE CSV / EXCEL
 # ======================
 def read_file(file):
     try:
+        # -------- Excel --------
         if file.name.lower().endswith(".xlsx"):
             return pd.read_excel(file)
 
-        # Tentatives CSV successives (réalistes terrain)
+        # -------- CSV --------
+        raw = file.read()
+        file.seek(0)
+
+        # Décodage
         try:
-            return pd.read_csv(file, sep=";", encoding="utf-8", engine="python")
-        except:
-            try:
-                return pd.read_csv(file, sep=",", encoding="utf-8", engine="python")
-            except:
-                return pd.read_csv(
-                    file,
-                    sep=";",
-                    encoding="latin1",
-                    engine="python",
-                    on_bad_lines="skip"
-                )
-    except Exception:
+            text = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            text = raw.decode("latin1")
+
+        # Détection automatique du séparateur
+        sniffer = csv.Sniffer()
+        dialect = sniffer.sniff(text[:5000], delimiters=";,|\t")
+        sep = dialect.delimiter
+
+        return pd.read_csv(
+            io.StringIO(text),
+            sep=sep,
+            engine="python",
+            on_bad_lines="skip"
+        )
+
+    except Exception as e:
         raise ValueError(
-            "Impossible de lire le fichier. "
-            "Merci de vérifier le format CSV ou Excel."
+            "Impossible de lire le fichier CSV ou Excel. "
+            "Merci de vérifier le format du fichier."
         )
 
 # ======================
@@ -70,7 +81,7 @@ if doc1 and doc2:
         st.stop()
 
     # ======================
-    # VÉRIFICATIONS DE BASE
+    # VÉRIFICATIONS
     # ======================
     if df.shape[1] < 10:
         st.error("❌ Le fichier de facturation ne contient pas assez de colonnes.")
@@ -79,6 +90,10 @@ if doc1 and doc2:
     if rs_df.shape[1] < 1:
         st.error("❌ Le fichier des raisons sociales est invalide.")
         st.stop()
+
+    st.success(
+        f"📊 Fichier chargé : {df.shape[0]} lignes – {df.shape[1]} colonnes"
+    )
 
     # ======================
     # NORMALISATION
@@ -92,7 +107,7 @@ if doc1 and doc2:
     ).fillna(0)
 
     # ======================
-    # CHOIX COLONNE SMS / VOCAL (UX FRIENDLY)
+    # CHOIX COLONNE SERVICE
     # ======================
     service_col = st.selectbox(
         "📡 Colonne indiquant le type de service (SMS / Vocal)",
@@ -158,7 +173,7 @@ if doc1 and doc2:
 
     st.info(
         f"✔ {df_final.shape[0]} lignes générées\n"
-        f"✔ {df_final.iloc[:,1].nunique()} raisons sociales"
+        f"✔ {df_final.iloc[:, 1].nunique()} raisons sociales"
     )
 
     # ======================
