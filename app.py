@@ -14,7 +14,7 @@ st.set_page_config(
 )
 
 st.title("🧾 Outil de transformation de facturation")
-st.caption("Importez vos fichiers de facturation puis cliquez sur Transformer.")
+st.caption("Importez vos fichiers puis cliquez sur Transformer.")
 
 # ======================
 # UPLOAD FICHIERS
@@ -30,7 +30,7 @@ doc2 = st.file_uploader(
 )
 
 # ======================
-# LECTURE ROBUSTE CSV / EXCEL
+# LECTURE ROBUSTE
 # ======================
 def read_file(file):
     if file.name.lower().endswith(".xlsx"):
@@ -60,41 +60,62 @@ def read_file(file):
 # ======================
 if doc1 and doc2 and st.button("🚀 Transformer les fichiers"):
     with st.spinner("⏳ Transformation en cours…"):
+        # Lecture
         df = read_file(doc1)
         rs_df = read_file(doc2)
 
-        # ======================
-        # NORMALISATION
-        # ======================
-        df.iloc[:, 1] = df.iloc[:, 1].astype(str).str.strip()   # raison sociale
+        # Normalisation
+        df.iloc[:, 1] = df.iloc[:, 1].astype(str).str.strip()  # raison sociale
         rs_df.iloc[:, 0] = rs_df.iloc[:, 0].astype(str).str.strip()
-
         df.iloc[:, 9] = pd.to_numeric(df.iloc[:, 9], errors="coerce")
 
-        # ======================
-        # FILTRAGE DES LIGNES INVALIDES
-        # ======================
+        # Suppression lignes invalides
         df = df[
-            df.iloc[:, 6].notna() &     # Date d'opération non nulle
-            df.iloc[:, 4].notna()       # Status non nul
+            df.iloc[:, 6].notna() &  # Date d'opération
+            df.iloc[:, 4].notna()    # Status
         ].copy()
 
+        # Filtres métier
         base_df = df[
             (df.iloc[:, 4] != "NOT INJECTED") &
             (df.iloc[:, 9] > 0)
         ].copy()
 
-        # ======================
-        # FILTRE DOC 2
-        # ======================
-        base_df = base_df[
-            base_df.iloc[:, 1].isin(rs_df.iloc[:, 0])
-        ]
+        # Filtre Doc 2
+        in_doc2 = base_df.iloc[:, 1].isin(rs_df.iloc[:, 0])
+        base_df = base_df[in_doc2]
 
         # ======================
-        # AGRÉGATION
+        # SYNTHÈSE GLOBALE
         # ======================
-        group_cols = [df.columns[1], df.columns[2]]  # raison sociale + numéro op
+        service_col = df.columns[3]
+        is_sms = base_df[service_col] == "SMS"
+        is_vocal = base_df[service_col] == "VOCAL"
+
+        summary = pd.DataFrame({
+            "Catégorie": [
+                "SMS – Raisons sociales du doc 2",
+                "SMS – Autres raisons sociales",
+                "Vocal – Raisons sociales du doc 2",
+                "Vocal – Autres raisons sociales"
+            ],
+            "Nombre de messages": [
+                base_df[is_sms].iloc[:, 9].sum(),
+                0,
+                base_df[is_vocal].iloc[:, 9].sum(),
+                0,
+            ]
+        })
+
+        summary_display = summary.copy()
+        summary_display["Nombre de messages"] = summary_display["Nombre de messages"].apply(
+            lambda x: f"{int(x):,}".replace(",", " ")
+        )
+
+        # ======================
+        # AGRÉGATION DÉTAILLÉE
+        # ======================
+        group_cols = [df.columns[1], df.columns[2]]
 
         agg = {
             df.columns[0]: "first",  # plateforme
@@ -115,9 +136,6 @@ if doc1 and doc2 and st.button("🚀 Transformer les fichiers"):
             .agg(agg)
         )
 
-        # ======================
-        # RENOMMAGE DES COLONNES (OUTPUT FINAL)
-        # ======================
         df_final.columns = [
             "Plateforme",
             "Raison sociale",
@@ -148,12 +166,18 @@ if doc1 and doc2 and st.button("🚀 Transformer les fichiers"):
     st.subheader("🔎 Facturation détaillée")
     st.dataframe(df_final, width="stretch")
 
+    st.subheader("📊 Résumé global SMS / Vocal")
+    st.dataframe(summary_display, width="stretch")
+
+    st.info("Ce résumé est inclus dans la deuxième feuille de l’Excel.")
+
     # ======================
     # EXPORT EXCEL
     # ======================
     output = BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         df_final.to_excel(writer, index=False, sheet_name="Facturation détaillée")
+        summary.to_excel(writer, index=False, sheet_name="Synthèse globale")
 
         ws = writer.sheets["Facturation détaillée"]
         fill_a = PatternFill("solid", fgColor="EEEEEE")
